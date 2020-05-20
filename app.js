@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const net = require("net");
 const fs = require("fs");
 
@@ -7,19 +8,24 @@ const highscoresDir = "./highscores/";
 var socketServer = net.createServer(onConnect);
 socketServer.listen(29261);
 
+
 var clients = {};
+var matches = {};
 
 
 function onConnect(socket) {
-    socket.on("data", (data) => {onData(data, socket)});
-    
-    var client = {operation: 0x00, socket: socket, data: Buffer.alloc(2048)}
-    clients[socket] = client;
+    socket.name = socket.remoteAddress + ":" + socket.remotePort;
+    socket.on("data", (data) => {onData(data, socket.name)});
+    socket.on("close", () => {removeClient(clients[socket.name])});
+    socket.on("error", (err) => {});
+
+    var client = {operation: 0x00, socket: socket, data: null}
+    clients[socket.name] = client;
 }
 
 
-function onData(data, socket) {
-    var client = clients[socket];
+function onData(data, clientName) {
+    var client = clients[clientName];
 
     if (client.operation == 0x00) {
         switch (data[0])
@@ -28,11 +34,96 @@ function onData(data, socket) {
                 presentScoreboard(client);
                 break;
         
-            case 0x02:        
+            case 0x02:
+                client.operation = 0x02;
+                if (data.length > 1) {
+                    data = data.subarray(1);
+                }else{
+                    return;
+                }
+                break;
+            
+            case 0x03:
+                client.operation = 0x03;
+                if (data.length > 1) {
+                    data = data.subarray(1);
+                }else{
+                    return;
+                }
+                break;
+
+            case 0x04:
+                client.operation = 0x04;
+                if (data.length > 1) {
+                    data = data.subarray(1);
+                }else{
+                    return;
+                }
                 break;
 
             default:
+                removeClient(client);
                 break;
+        }
+    }
+
+    if (client.data == null) {
+        client.data = data;
+    }else{
+        client.data = Buffer.concat([client.data, data]);
+    }
+
+
+    if (client.operation == 0x02) {
+        if (client.data.indexOf(0x00) != -1) {
+            receiveScoreboardUpdate(client);
+        }
+    }
+
+    if (client.operation == 0x03) {
+        if (client.data.indexOf(0x01) != -1 && client.match == undefined) {
+            
+            var level = client.data.subarray(0, client.data.indexOf(0x01));client.data = client.data.subarray(client.data.indexOf(0x01)+1);
+            var matchCode = crypto.randomBytes(3).toString("hex");
+
+            while (matches[matchCode] != undefined) {
+                matchCode = crypto.randomBytes(3).toString("hex");
+            }
+
+            matches[matchCode] = {"level": level, "host": client, "opponent": undefined};
+            client.match = matchCode;
+            client.socket.write(matchCode);
+            console.log(matches);
+
+        }else if (client.data.indexOf(0x01) != -1 && client.match != undefined) {
+            if (matches[client.match].opponent != undefined) {
+                matches[client.match].opponent.socket.write(client.data.subarray(0, client.data.indexOf(0x01)+1));
+                client.data = client.data.subarray(client.data.indexOf(0x01)+1);
+            }
+        }
+    }
+
+    if (client.operation == 0x04) {
+        if (client.data.indexOf(0x01) != -1 && client.match == undefined) {
+            
+            var matchCode = client.data.subarray(0, client.data.indexOf(0x01)); client.data = client.data.subarray(client.data.indexOf(0x01)+1);
+            var match = matches[matchCode];
+
+            if (match == undefined) {
+                var response = Buffer.from([0x04, 0x01]);
+                client.socket.write(response);
+                client.operation = 0xFF;
+            }else{
+                client.match = matchCode;
+                match.opponent = client;
+                client.socket.write(Buffer.concat([match.level, Buffer.from([0x01])]));
+            }
+            
+
+        }else if (client.data.indexOf(0x01) != -1 && client.match != undefined) {
+            if (matches[client.match].host != undefined) {
+                matches[client.match].host.socket.write(client.data.subarray(0, client.data.indexOf(0x01)+1)); client.data = client.data.subarray(client.data.indexOf(0x01)+1);
+            }
         }
     }
 }
@@ -57,10 +148,10 @@ function presentScoreboard(client) {
                     payload = payload + fileName + "\n";
                     var indexOfNL = data.indexOf('\n');
 
-                    while (indexOfNL > 0) {
+                    while (indexOfNL != -1) {
                         var line = data.subarray(0, indexOfNL).toString("utf-8");
                         var entry = line.split(":");
-                        data = data.subarray(indexOfNL);
+                        data = data.subarray(indexOfNL+1);
 
                         if (entry.length == 2) {
                             payload = payload + "    "+entry[0]+": "+entry[1]+" moves\n";
@@ -85,8 +176,54 @@ function presentScoreboard(client) {
 }
 
 
+function receiveScoreboardUpdate(client) {
+    var levelCount = 0;
+    while (true) {
+        var fileName = highscoresDir + client.data.subarray(0, client.data.indexOf(0x01));
+        client.data = client.data.subarray(client.data.indexOf(0x01) + 1);
+        var payload = client.data.subarray(0, client.data.indexOf(0x01));
+        client.data = client.data.subarray(client.data.indexOf(0x01) + 1);
+
+        fs.writeFile(fileName, payload, {flag: "a"}, (err) => {if (err) { console.error(err); }});
+        levelCount++;
+
+        if (client.data[0] == 0x00) {
+            console.log("Received updates for "+levelCount+" levels from "+client.socket.remoteAddress);
+            client.socket.write("Received updates for "+levelCount+" levels.");
+            removeClient(client);
+            return;
+        }
+    }
+}
+
+
 function removeClient(client) {
+    if (client == undefined) {
+        return;
+    }
+
+    if (client.match != undefined) {
+        removeMatch(client.match);
+        return;
+    }
+
     client.socket.end();
     client.socket.destroy();
-    delete clients[client.socket];
+    delete clients[client.socket.name];
+}
+
+function removeMatch(matchCode) {
+
+    var match = matches[matchCode];
+    
+    if (match.host != undefined) {
+        try { match.host.socket.write(Buffer.from([0x02])) } catch (error) {}
+        delete clients[match.host.socket.name];
+    }
+    if (match.opponent != undefined) {
+        try { match.opponent.socket.write(Buffer.from([0x02])) } catch (error) {}
+        delete clients[match.opponent.socket.name];
+    }
+
+    delete matches[matchCode];
 }
