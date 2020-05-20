@@ -107,18 +107,17 @@ function onData(data, clientName) {
         if (client.data.indexOf(0x01) != -1 && client.match == undefined) {
             
             var matchCode = client.data.subarray(0, client.data.indexOf(0x01)); client.data = client.data.subarray(client.data.indexOf(0x01)+1);
-            var match = matches[matchCode];
 
-            if (match == undefined) {
+            if (matches[matchCode] == undefined) {
                 var response = Buffer.from([0x04, 0x01]);
                 client.socket.write(response);
                 client.operation = 0xFF;
             }else{
-                client.match = matchCode;
-                match.opponent = client;
-                client.socket.write(Buffer.concat([match.level, Buffer.from([0x01])]));
+                client.match = matchCode.toString();
+                matches[matchCode].opponent = client;
+                client.socket.write(Buffer.concat([matches[matchCode].level, Buffer.from([0x01])]));
             }
-            
+            console.log(matches);            
 
         }else if (client.data.indexOf(0x01) != -1 && client.match != undefined) {
             if (matches[client.match].host != undefined) {
@@ -217,11 +216,13 @@ function removeMatch(matchCode) {
     var match = matches[matchCode];
     
     if (match.host != undefined) {
-        try { match.host.socket.write(Buffer.from([0x02])) } catch (error) {}
+        match.host.socket.write(Buffer.from([0x02, 0x01]));
+        match.host.socket.end();
         delete clients[match.host.socket.name];
     }
     if (match.opponent != undefined) {
-        try { match.opponent.socket.write(Buffer.from([0x02])) } catch (error) {}
+        match.opponent.socket.write(Buffer.from([0x02, 0x01]));
+        match.opponent.socket.end();
         delete clients[match.opponent.socket.name];
     }
 
