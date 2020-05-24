@@ -27,6 +27,10 @@ function onConnect(socket) {
 function onData(data, clientName) {
     var client = clients[clientName];
 
+    if (client == undefined) {
+        return;
+    }
+
     if (client.operation == 0x00) {
         switch (data[0])
         {
@@ -89,11 +93,11 @@ function onData(data, clientName) {
             while (matches[matchCode] != undefined) {
                 matchCode = crypto.randomBytes(3).toString("hex");
             }
-
+            
             matches[matchCode] = {"level": level, "host": client, "opponent": undefined};
             client.match = matchCode;
             client.socket.write(matchCode);
-            console.log(matches);
+            console.log(client.socket.remoteAddress+" created match with code "+matchCode);
 
         }else if (client.data.indexOf(0x01) != -1 && client.match != undefined) {
             if (matches[client.match].opponent != undefined) {
@@ -112,12 +116,13 @@ function onData(data, clientName) {
                 var response = Buffer.from([0x04, 0x01]);
                 client.socket.write(response);
                 client.operation = 0xFF;
+                console.log(client.socket.remoteAddress+" tried to join non existing match "+matchCode);  
             }else{
                 client.match = matchCode.toString();
-                matches[matchCode].opponent = client;
+                matches[matchCode].opponent = client; 
                 client.socket.write(Buffer.concat([matches[matchCode].level, Buffer.from([0x01])]));
-            }
-            console.log(matches);            
+                console.log(client.socket.remoteAddress+" joined match "+matchCode+" hosted by "+client.socket.remoteAddress); 
+            }          
 
         }else if (client.data.indexOf(0x01) != -1 && client.match != undefined) {
             if (matches[client.match].host != undefined) {
@@ -201,6 +206,8 @@ function removeClient(client) {
         return;
     }
 
+    console.log("Removing client "+client.socket.remoteAddress);
+
     if (client.match != undefined) {
         removeMatch(client.match);
         return;
@@ -218,13 +225,16 @@ function removeMatch(matchCode) {
     if (match.host != undefined) {
         match.host.socket.write(Buffer.from([0x02, 0x01]));
         match.host.socket.end();
+        console.log("Removed match "+matchCode+" host "+match.host.socket.remoteAddress);
         delete clients[match.host.socket.name];
     }
     if (match.opponent != undefined) {
         match.opponent.socket.write(Buffer.from([0x02, 0x01]));
         match.opponent.socket.end();
+        console.log("Removed match "+matchCode+" opponent "+match.opponent.socket.remoteAddress);
         delete clients[match.opponent.socket.name];
     }
 
     delete matches[matchCode];
+    console.log("Removed match "+matchCode);
 }
