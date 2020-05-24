@@ -193,7 +193,7 @@ function receiveScoreboardUpdate(client) {
 
         if (client.data[0] == 0x00) {
             console.log("Received updates for "+levelCount+" levels from "+client.socket.remoteAddress);
-            client.socket.write("Received updates for "+levelCount+" levels.");
+            client.socket.write("Uploaded scores for "+levelCount+" levels.");
             removeClient(client);
             return;
         }
