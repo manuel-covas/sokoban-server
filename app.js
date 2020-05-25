@@ -116,8 +116,15 @@ function onData(data, clientName) {
                 var response = Buffer.from([0x04, 0x01]);
                 client.socket.write(response);
                 client.operation = 0xFF;
-                console.log(client.socket.remoteAddress+" tried to join non existing match "+matchCode);  
+                console.log(client.socket.remoteAddress+" tried to join non existing match "+matchCode);
             }else{
+                if (matches[matchCode].opponent != undefined) {
+                    var response = Buffer.from([0x04, 0x01]);
+                    client.socket.write(response);
+                    client.operation = 0xFF;
+                    console.log(client.socket.remoteAddress+" tried to join in progress match "+matchCode);
+                    return;
+                }
                 client.match = matchCode.toString();
                 matches[matchCode].opponent = client; 
                 client.socket.write(Buffer.concat([matches[matchCode].level, Buffer.from([0x01])]));
